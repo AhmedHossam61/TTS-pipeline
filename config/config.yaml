@@ -1,0 +1,91 @@
+pipeline:
+  # Set to null for auto-generated run ID (run_YYYYMMDD_HHMMSS)
+  run_id: null
+  data_dir: data
+
+# ── Stage 1: Prompt Generation ───────────────────────────────────────────────
+generation:
+  num_prompts: 200
+  gemini_model: gemini-1.5-flash
+  expand_with_gemini: true          # false = seed corpus only
+  gemini_sentences_per_call: 20     # sentences per API call
+  seed_file: data/seeds/seed_sentences.txt
+  output_dir: data/prompts
+  strip_diacritics: true            # normalize tashkeel before TTS
+  domains:
+    - conversation
+    - shopping
+    - transport
+    - numbers_and_dates
+    - places
+    - emotions
+    - instructions
+    - work
+    - technology
+    - education
+    - health
+    - family
+    - food
+    - weather
+
+# ── Stage 2: TTS Synthesis ────────────────────────────────────────────────────
+synthesis:
+  batch_size: 10
+  max_retries: 3
+  audio_dir: data/audio
+  manifest_dir: data/manifests
+  checkpoint_db: data/synthesis.db
+  sample_rate: 24000                # unified output sample rate
+
+  engines:
+    - name: edge-tts
+      enabled: true
+      voices:
+        - ar-EG-SalmaNeural         # female
+        - ar-EG-ShakirNeural        # male
+
+    - name: egtts
+      enabled: true
+      model_repo: OmarSamir/EGTTS-V0.1
+      # Path to a clean 6-12s WAV reference audio (the speaker voice to clone)
+      # Run: python scripts/download_references.py  to get sample reference files
+      reference_audio: data/references/egtts_reference.wav
+      use_deepspeed: false          # deepspeed is unreliable on Windows
+      temperature: 0.75
+      device: cuda                  # or cpu
+
+    - name: niletts
+      enabled: true
+      model_repo: KickItLikeShika/NileTTS-XTTS
+      reference_audio: data/references/niletts_reference.wav
+      use_deepspeed: false
+      temperature: 0.70
+      device: cuda
+
+    # Google Cloud TTS — set enabled: true and configure credentials in .env
+    - name: google-vertex
+      enabled: false
+      voice_name: ar-EG-Standard-A
+      speaking_rate: 1.0
+
+# ── Stage 3: Review UI ───────────────────────────────────────────────────────
+review:
+  host: 127.0.0.1
+  port: 7860
+  share: false                      # set true to expose via public gradio link
+
+# ── Automated quality signals ─────────────────────────────────────────────────
+quality:
+  min_duration_sec: 0.5
+  max_duration_sec: 30.0
+  min_snr_db: 10.0                  # clips below this are flagged
+  max_silence_ratio: 0.35           # leading+trailing silence fraction
+
+# ── Stage 4: Export ───────────────────────────────────────────────────────────
+export:
+  output_dir: data/export
+  train_split: 0.90
+  test_split: 0.10
+  audio_format: wav
+  # include_rejected: false means only "approved" samples are exported
+  include_rejected: false

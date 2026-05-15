@@ -1,4 +1,17 @@
-# Byte-compiled / optimized / DLL files
+# ── Pipeline-specific ────────────────────────────────────────────────────────
+# Generated data (audio, manifests, exports) — too large for git
+data/audio/
+data/manifests/
+data/export/
+data/prompts/
+data/synthesis.db
+data/references/*.wav
+
+# Environment
+.env
+config/.env
+
+# ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[codz]
 *$py.class

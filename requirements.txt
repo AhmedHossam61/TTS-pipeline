@@ -1,0 +1,40 @@
+# ── Core ─────────────────────────────────────────────────────────────────────
+python-dotenv>=1.0.0
+PyYAML>=6.0.0
+tqdm>=4.66.0
+numpy>=1.24.0
+
+# ── Prompt generation ────────────────────────────────────────────────────────
+google-generativeai>=0.8.0
+
+# ── TTS engines ──────────────────────────────────────────────────────────────
+edge-tts>=7.0.0
+# Coqui TTS (EGTTS-V0.1 and NileTTS are both XTTS-v2 fine-tunes)
+# Install from git for latest fixes:
+#   pip install git+https://github.com/coqui-ai/TTS
+# Or use PyPI release:
+TTS>=0.22.0
+
+# ── PyTorch (CUDA 12.x) — install manually if not already present ─────────────
+# pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+torch>=2.2.0
+torchaudio>=2.2.0
+
+# ── HuggingFace ──────────────────────────────────────────────────────────────
+huggingface_hub>=0.24.0
+datasets>=2.18.0
+
+# ── Audio processing ─────────────────────────────────────────────────────────
+librosa>=0.10.0
+soundfile>=0.12.0
+pydub>=0.25.0   # requires ffmpeg; see README for install instructions
+
+# ── Review UI ────────────────────────────────────────────────────────────────
+gradio>=4.20.0
+
+# ── Google Cloud TTS (optional, Stage 2 Vertex engine) ───────────────────────
+google-cloud-texttospeech>=2.16.0
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest>=7.0.0
+pytest-asyncio>=0.23.0
