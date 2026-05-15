@@ -9,11 +9,20 @@ google-generativeai>=0.8.0
 
 # ── TTS engines ──────────────────────────────────────────────────────────────
 edge-tts>=7.0.0
+
 # Coqui TTS (EGTTS-V0.1 and NileTTS are both XTTS-v2 fine-tunes)
-# Install from git for latest fixes:
-#   pip install git+https://github.com/coqui-ai/TTS
-# Or use PyPI release:
-TTS>=0.22.0
+#
+# TTS==0.22.0 from PyPI does NOT build on Python 3.11+ / Windows due to
+# removed setuptools APIs.  Use the community-maintained fork instead:
+#
+#   pip install coqui-tts
+#
+# Or from the original git repo (may have Python 3.13 patches):
+#   pip install "TTS @ git+https://github.com/coqui-ai/TTS"
+#
+# coqui-tts is API-compatible with the original TTS package, so no
+# code changes are needed.
+coqui-tts
 
 # ── PyTorch (CUDA 12.x) — install manually if not already present ─────────────
 # pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
