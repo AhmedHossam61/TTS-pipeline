@@ -77,7 +77,7 @@ class CheckpointDB:
         (so calling add_jobs twice is safe / idempotent).
 
         Each dict must have keys: job_id, prompt_id, engine, voice, text.
-        Optional keys: domain, source.
+        Optional keys: domain, source, audio_path.
 
         Returns the number of rows actually inserted.
         """
@@ -90,8 +90,8 @@ class CheckpointDB:
                         """
                         INSERT INTO synthesis_jobs
                             (job_id, prompt_id, engine, voice, text,
-                             domain, source, status, created_at, updated_at)
-                        VALUES (?,?,?,?,?,?,?,'pending',?,?)
+                             domain, source, audio_path, status, created_at, updated_at)
+                        VALUES (?,?,?,?,?,?,?,?,'pending',?,?)
                         """,
                         (
                             j["job_id"],
@@ -101,6 +101,7 @@ class CheckpointDB:
                             j["text"],
                             j.get("domain"),
                             j.get("source"),
+                            j.get("audio_path"),
                             now,
                             now,
                         ),

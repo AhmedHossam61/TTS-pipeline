@@ -52,6 +52,8 @@ import json
 import logging
 import os
 import re
+import shutil
+import subprocess
 import tempfile
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -76,14 +78,67 @@ def _safe_stem(text: str) -> str:
     return re.sub(r"[^\w]", "_", text)[:30]
 
 
+def _configure_ffmpeg_runtime() -> None:
+    """Prepend a shared FFmpeg bin directory on Windows if one is installed."""
+    if os.name != "nt":
+        return
+
+    path_parts = os.environ.get("PATH", "").split(os.pathsep)
+    if any("ffmpeg" in p.lower() and Path(p).exists() for p in path_parts):
+        for p in path_parts:
+            pl = p.lower()
+            if (
+                "ffmpeg" in pl
+                and Path(p, "avcodec-62.dll").exists()
+                and Path(p, "avformat-62.dll").exists()
+            ):
+                return
+
+    local_appdata = Path(os.environ.get("LOCALAPPDATA", ""))
+    candidates = []
+    if local_appdata:
+        candidates.extend(
+            sorted(
+                local_appdata.glob(
+                    "Microsoft/WinGet/Packages/Gyan.FFmpeg.Shared*/*/bin"
+                ),
+                reverse=True,
+            )
+        )
+
+    for candidate in candidates:
+        if (
+            candidate.exists()
+            and (candidate / "avcodec-62.dll").exists()
+            and (candidate / "avformat-62.dll").exists()
+        ):
+            os.environ["PATH"] = str(candidate) + os.pathsep + os.environ.get("PATH", "")
+            log.info("Prepended shared FFmpeg bin to PATH: %s", candidate)
+            return
+
+
 def _mp3_to_wav(mp3_path: str | Path, wav_path: str | Path, target_sr: int = TARGET_SR) -> None:
-    """Convert an MP3 file to a normalised mono WAV using torchaudio."""
-    waveform, sr = torchaudio.load(str(mp3_path))
-    if sr != target_sr:
-        waveform = torchaudio.functional.resample(waveform, sr, target_sr)
-    if waveform.shape[0] > 1:
-        waveform = waveform.mean(dim=0, keepdim=True)
-    torchaudio.save(str(wav_path), waveform, target_sr)
+    """Convert an MP3 file to a mono WAV using ffmpeg to avoid torchcodec."""
+    ffmpeg_exe = shutil.which("ffmpeg")
+    if not ffmpeg_exe:
+        raise RuntimeError("ffmpeg not found on PATH")
+
+    subprocess.run(
+        [
+            ffmpeg_exe,
+            "-y",
+            "-i",
+            str(mp3_path),
+            "-ar",
+            str(target_sr),
+            "-ac",
+            "1",
+            str(wav_path),
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 
 # ── Abstract engine interface ─────────────────────────────────────────────────
@@ -400,6 +455,9 @@ def run_stage2(config: Dict, run_id: str, prompts_manifest: str | Path) -> Path:
     audio_dir.mkdir(parents=True, exist_ok=True)
     manifest_dir.mkdir(parents=True, exist_ok=True)
 
+    # Make shared FFmpeg DLLs available to torchcodec/TTS on Windows.
+    _configure_ffmpeg_runtime()
+
     # ── Load prompts ──────────────────────────────────────────────────────────
     from pipeline.stage1_generate import load_prompts
     prompts = load_prompts(prompts_manifest)
@@ -454,7 +512,12 @@ def run_stage2(config: Dict, run_id: str, prompts_manifest: str | Path) -> Path:
             if engine is None:
                 continue
             db.mark_running(job["job_id"])
-            output_path = Path(job["audio_path"])
+            output_path_str = job.get("audio_path")
+            if not output_path_str:
+                # Backward compatibility for older DB rows inserted before
+                # audio_path was persisted in synthesis_jobs.
+                output_path_str = str(audio_dir / f"{job['job_id']}.wav")
+            output_path = Path(output_path_str)
             # Skip if audio already exists on disk (extra safety net)
             if output_path.exists() and output_path.stat().st_size > 0:
                 db.mark_completed(job["job_id"], str(output_path))
@@ -484,11 +547,12 @@ def run_stage2(config: Dict, run_id: str, prompts_manifest: str | Path) -> Path:
                 break
             log.info("[%s] Retrying %d failed jobs …", engine.name, len(failed_for_engine))
             for j in tqdm(failed_for_engine, desc=f"{engine.name} retry"):
+                retry_output = j.get("audio_path") or str(audio_dir / f"{j['job_id']}.wav")
                 engine_map[j["engine"]].synthesize(
-                    j["text"], j["voice"], j["audio_path"]
+                    j["text"], j["voice"], retry_output
                 )
-                if Path(j["audio_path"]).exists():
-                    db.mark_completed(j["job_id"], j["audio_path"])
+                if Path(retry_output).exists():
+                    db.mark_completed(j["job_id"], retry_output)
 
         # Free GPU memory after each XTTS engine
         if hasattr(engine, "unload"):
