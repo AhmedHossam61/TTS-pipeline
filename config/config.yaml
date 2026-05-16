@@ -6,7 +6,7 @@ pipeline:
 # ── Stage 1: Prompt Generation ───────────────────────────────────────────────
 generation:
   num_prompts: 10
-  gemini_model: gemini-1.5-flash
+  gemini_model: gemini-3.0-flash
   expand_with_gemini: false         # false = seed corpus only
   gemini_sentences_per_call: 20     # sentences per API call
   seed_file: data/seeds/seed_sentences.txt
@@ -55,6 +55,23 @@ synthesis:
       temperature: 0.75
       device: cuda                  # or cpu
 
+    - name: gemini-tts
+      enabled: true
+      model_name: gemini-3.1-flash-tts-preview
+      language_code: ar-EG
+      # Uses GOOGLE_CLOUD_PROJECT from config/.env when null.
+      project_id: null
+      # gemini-3.1-flash-tts-preview is currently listed for Vertex AI global.
+      # For europe-west4, use a region-supported model such as gemini-2.5-flash-tts.
+      location: global
+      temperature: 1.0
+      prompt: >
+        Read the following text in natural Egyptian Arabic. Keep the wording
+        unchanged, use a clear conversational tone, and avoid adding extra words.
+      voices:
+        - Charon
+        - Achernar
+
     - name: niletts
       enabled: false
       model_repo: KickItLikeShika/NileTTS-XTTS
@@ -65,7 +82,7 @@ synthesis:
 
     # Google Cloud TTS — set enabled: true and configure credentials in .env
     - name: google-vertex
-      enabled: false
+      enabled: true
       voice_name: ar-EG-Standard-A
       speaking_rate: 1.0
 

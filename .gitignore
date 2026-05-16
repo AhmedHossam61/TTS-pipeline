@@ -229,7 +229,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-
+.claude/
+.tmp_pytest/ 
+.tmp_pytest_run2/
+.checkpoint_test_dbs/
 SSDP_Task (1)_2.pdf
-comments/*.md
 PROJECT_CONSTITUTION.md

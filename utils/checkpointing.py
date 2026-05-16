@@ -112,6 +112,85 @@ class CheckpointDB:
                     pass
         return inserted
 
+    def sync_jobs(self, jobs: List[Dict]) -> Dict[str, int]:
+        """
+        Insert new jobs and refresh unfinished rows whose prompt metadata changed.
+
+        Completed jobs are intentionally left untouched so resumable runs do not
+        invalidate audio that was already synthesized.  Pending and failed rows
+        are updated because they have not produced accepted audio yet and should
+        follow the current prompts manifest.
+        """
+        stats = {"inserted": 0, "updated": 0, "kept_completed": 0}
+        now = self._now()
+        with self._conn() as con:
+            for j in jobs:
+                row = con.execute(
+                    """
+                    SELECT text, domain, source, audio_path, status
+                    FROM synthesis_jobs
+                    WHERE job_id=?
+                    """,
+                    (j["job_id"],),
+                ).fetchone()
+
+                if row is None:
+                    con.execute(
+                        """
+                        INSERT INTO synthesis_jobs
+                            (job_id, prompt_id, engine, voice, text,
+                             domain, source, audio_path, status, created_at, updated_at)
+                        VALUES (?,?,?,?,?,?,?,?,'pending',?,?)
+                        """,
+                        (
+                            j["job_id"],
+                            j["prompt_id"],
+                            j["engine"],
+                            j["voice"],
+                            j["text"],
+                            j.get("domain"),
+                            j.get("source"),
+                            j.get("audio_path"),
+                            now,
+                            now,
+                        ),
+                    )
+                    stats["inserted"] += 1
+                    continue
+
+                changed = (
+                    row["text"] != j["text"]
+                    or (row["domain"] or "") != (j.get("domain") or "")
+                    or (row["source"] or "") != (j.get("source") or "")
+                    or (row["audio_path"] or "") != (j.get("audio_path") or "")
+                )
+                if not changed:
+                    continue
+
+                if row["status"] == "completed":
+                    stats["kept_completed"] += 1
+                    continue
+
+                con.execute(
+                    """
+                    UPDATE synthesis_jobs
+                    SET prompt_id=?, text=?, domain=?, source=?, audio_path=?,
+                        status='pending', attempts=0, error=NULL, updated_at=?
+                    WHERE job_id=?
+                    """,
+                    (
+                        j["prompt_id"],
+                        j["text"],
+                        j.get("domain"),
+                        j.get("source"),
+                        j.get("audio_path"),
+                        now,
+                        j["job_id"],
+                    ),
+                )
+                stats["updated"] += 1
+        return stats
+
     def get_pending(self, engine: Optional[str] = None, limit: int = 0) -> List[Dict]:
         """Return pending jobs, optionally filtered by engine."""
         with self._conn() as con:

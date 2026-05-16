@@ -446,6 +446,111 @@ class GoogleVertexEngine(TTSEngine):
 
 # ── Engine factory ────────────────────────────────────────────────────────────
 
+class GeminiTTSEngine(TTSEngine):
+    """Gemini-TTS through the Vertex AI Gemini API."""
+
+    name = "gemini-tts"
+
+    def __init__(self, cfg: Dict) -> None:
+        self._model_name: str = cfg.get(
+            "model_name", "gemini-3.1-flash-tts-preview"
+        )
+        self._voices: List[str] = cfg.get("voices", ["Charon"])
+        self._language_code: str = cfg.get("language_code", "ar-EG")
+        self._temperature: float = cfg.get("temperature", 1.0)
+        self._project_id: Optional[str] = (
+            cfg.get("project_id") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+        )
+        self._prompt: str = cfg.get(
+            "prompt",
+            (
+                "Read the following text in natural Egyptian Arabic. "
+                "Keep the wording unchanged, use a clear conversational tone, "
+                "and avoid adding extra words."
+            ),
+        )
+        self._location: str = (
+            cfg.get("location")
+            or os.environ.get("GOOGLE_CLOUD_LOCATION")
+            or os.environ.get("GOOGLE_CLOUD_REGION")
+            or "global"
+        )
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            from google import genai  # noqa: PLC0415
+
+            self._client = genai.Client(
+                vertexai=True,
+                project=self._project_id,
+                location=self._location,
+            )
+        return self._client
+
+    def voices(self) -> List[str]:
+        return self._voices
+
+    def is_available(self) -> bool:
+        if not self._project_id:
+            log.warning(
+                "[gemini-tts] GOOGLE_CLOUD_PROJECT is not set and no project_id "
+                "was provided in config."
+            )
+            return False
+        try:
+            from google import genai  # noqa: F401
+            from google.genai import types  # noqa: F401
+        except ImportError:
+            log.warning(
+                "[gemini-tts] google-genai is not installed. "
+                "Run: pip install google-genai"
+            )
+            return False
+        return True
+
+    def synthesize(self, text: str, voice: str, output_path: str | Path) -> bool:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            import wave
+            from google.genai import types
+
+            client = self._get_client()
+            contents = (
+                f"{self._prompt}\n\n"
+                "Text to synthesize exactly, without rewriting:\n"
+                f"{text}"
+            )
+            response = client.models.generate_content(
+                model=self._model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    speech_config=types.SpeechConfig(
+                        language_code=self._language_code,
+                        voice_config=types.VoiceConfig(
+                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                voice_name=voice,
+                            )
+                        ),
+                    ),
+                    temperature=self._temperature,
+                ),
+            )
+
+            audio_data = response.candidates[0].content.parts[0].inline_data.data
+            with wave.open(str(output_path), "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(TARGET_SR)
+                wf.writeframes(audio_data)
+            return True
+        except Exception as exc:
+            log.warning("[gemini-tts] Synthesis failed for voice=%s: %s", voice, exc)
+            return False
+
+
 def build_engines(synthesis_cfg: Dict) -> List[TTSEngine]:
     """Instantiate enabled engines from the synthesis config block."""
     engines: List[TTSEngine] = []
@@ -459,6 +564,8 @@ def build_engines(synthesis_cfg: Dict) -> List[TTSEngine]:
             engines.append(XTTSEngine(ecfg))
         elif name == "google-vertex":
             engines.append(GoogleVertexEngine(ecfg))
+        elif name == "gemini-tts":
+            engines.append(GeminiTTSEngine(ecfg))
         else:
             log.warning("Unknown engine '%s' — skipped.", name)
 
@@ -517,7 +624,7 @@ def run_stage2(config: Dict, run_id: str, prompts_manifest: str | Path) -> Path:
         for engine in engines:
             for voice in engine.voices():
                 voice_slug = _safe_stem(voice)
-                job_id = f"{prompt['id']}_{engine.name}_{voice_slug}"
+                job_id = f"{run_id}_{prompt['id']}_{engine.name}_{voice_slug}"
                 audio_filename = f"{job_id}.wav"
                 jobs.append(
                     {
@@ -532,11 +639,14 @@ def run_stage2(config: Dict, run_id: str, prompts_manifest: str | Path) -> Path:
                     }
                 )
 
-    inserted = db.add_jobs(jobs)
+    sync_stats = db.sync_jobs(jobs)
     stats = db.get_stats()
     log.info(
-        "Checkpoint DB: %d new jobs registered.  Stats: %s",
-        inserted,
+        "Checkpoint DB: %d new jobs registered, %d unfinished jobs refreshed, "
+        "%d completed changed jobs kept. Stats: %s",
+        sync_stats["inserted"],
+        sync_stats["updated"],
+        sync_stats["kept_completed"],
         stats,
     )
 
@@ -558,8 +668,14 @@ def run_stage2(config: Dict, run_id: str, prompts_manifest: str | Path) -> Path:
                 # audio_path was persisted in synthesis_jobs.
                 output_path_str = str(audio_dir / f"{job['job_id']}.wav")
             output_path = Path(output_path_str)
-            # Skip if audio already exists on disk (extra safety net)
-            if output_path.exists() and output_path.stat().st_size > 0:
+            # Skip only when the checkpoint row already represents completed
+            # audio.  Pending/failed rows may have refreshed text and must be
+            # regenerated even if an old file exists at the same path.
+            if (
+                job.get("status") == "completed"
+                and output_path.exists()
+                and output_path.stat().st_size > 0
+            ):
                 db.mark_completed(job["job_id"], str(output_path))
                 continue
             success = engine.synthesize(job["text"], job["voice"], output_path)
