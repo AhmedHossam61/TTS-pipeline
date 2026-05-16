@@ -138,6 +138,23 @@ Decisions are written back to the manifest immediately — no save button, no da
 
 Automated quality signals (SNR, duration, silence ratio) are surfaced as flags but do not auto-reject — they highlight candidates for rejection, leaving final judgment to the human reviewer.
 
+## Evaluation Strategy
+
+This project uses **manual review as the primary evaluation method**. That is intentional: Egyptian Arabic is dialect-sensitive, and a clip can be technically intelligible while still sounding unnatural, overly formal, clipped, or wrong in accent and prosody. Those issues are hard for automatic metrics to judge reliably.
+
+Automatic STT-based evaluation with tools like Vertex STT is still useful, but as an **optional secondary signal**, not the main quality gate. It is best used to:
+
+- triage obvious transcript/audio mismatches
+- estimate WER/CER trends by engine, voice, or domain
+- compare future fine-tuned STT models against the same manifest
+
+In short:
+
+- **Manual review** = final decision for dataset quality
+- **Automatic evaluation** = optional scoring and filtering aid
+
+This keeps the pipeline honest about Egyptian Arabic quality while still making it possible to measure model performance automatically when needed.
+
 ---
 
 ## Output Format
