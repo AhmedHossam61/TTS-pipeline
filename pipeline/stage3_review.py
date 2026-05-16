@@ -8,6 +8,8 @@ Loads a synthesis manifest and lets a human reviewer:
   • Approve ✅ / Reject ❌ / Skip ⏭ each sample.
   • Add a free-text note (e.g. "wrong pronunciation", "clipping").
   • See automated quality flags (SNR, duration, silence) per sample.
+    • Use keyboard shortcuts: A=approve, R=reject, N=next sample.
+    • Bulk reject pending clips where quality_passed=false.
 
 Decisions are persisted to the manifest JSONL file in real time so that
 progress survives browser refreshes or app restarts.
@@ -155,6 +157,27 @@ def build_app(manifest_path: str | Path):
         # Auto-advance to next pending sample
         return _jump_to_next_pending()
 
+    def _batch_reject_failed_quality():
+        """
+        First-pass filter: reject all pending clips that failed quality checks.
+        Human review can then focus on borderline and quality-passed samples.
+        """
+        changed = 0
+        for rec in records:
+            if rec.get("review_status") != "pending":
+                continue
+            if rec.get("quality_passed", True):
+                continue
+            rec["review_status"] = "rejected"
+            if not rec.get("review_note"):
+                rec["review_note"] = "auto_reject: quality_passed=false"
+            changed += 1
+
+        if changed:
+            save_manifest(manifest_path, records)
+
+        return _jump_to_next_pending()
+
     # ── layout ────────────────────────────────────────────────────────────────
     with gr.Blocks(
         title="TTS Pipeline — Review UI",
@@ -172,6 +195,9 @@ def build_app(manifest_path: str | Path):
         """,
     ) as demo:
         gr.Markdown("# 🎙 TTS Pipeline — Review UI")
+        gr.Markdown(
+            "**Shortcuts:** `A` = Approve, `R` = Reject, `N` = Next"
+        )
         stats_md = gr.Markdown(_stats_text())
 
         with gr.Row():
@@ -179,6 +205,11 @@ def build_app(manifest_path: str | Path):
                 label="Progress", interactive=False, scale=3
             )
             jump_btn = gr.Button("⏩ Jump to next pending", scale=1)
+
+        batch_reject_btn = gr.Button(
+            "⚡ Batch reject pending clips with quality_passed = false",
+            variant="secondary",
+        )
 
         arabic_txt = gr.Textbox(
             label="Arabic Text",
@@ -200,13 +231,38 @@ def build_app(manifest_path: str | Path):
         )
 
         with gr.Row():
-            approve_btn = gr.Button("✅ Approve", variant="primary")
-            reject_btn  = gr.Button("❌ Reject",  variant="stop")
+            approve_btn = gr.Button("✅ Approve", variant="primary", elem_id="approve-btn")
+            reject_btn  = gr.Button("❌ Reject",  variant="stop", elem_id="reject-btn")
             skip_btn    = gr.Button("⏭ Skip")
 
         with gr.Row():
             prev_btn = gr.Button("◀ Previous")
-            next_btn = gr.Button("▶ Next")
+                        next_btn = gr.Button("▶ Next", elem_id="next-btn")
+
+                gr.HTML(
+                        """
+                        <script>
+                        (() => {
+                            const handler = (e) => {
+                                const tag = (document.activeElement?.tagName || '').toUpperCase();
+                                if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+                                const key = (e.key || '').toLowerCase();
+                                if (key === 'a') {
+                                    document.getElementById('approve-btn')?.click();
+                                    e.preventDefault();
+                                } else if (key === 'r') {
+                                    document.getElementById('reject-btn')?.click();
+                                    e.preventDefault();
+                                } else if (key === 'n') {
+                                    document.getElementById('next-btn')?.click();
+                                    e.preventDefault();
+                                }
+                            };
+                            window.addEventListener('keydown', handler);
+                        })();
+                        </script>
+                        """
+                )
 
         # ── wire events ───────────────────────────────────────────────────────
         outputs = [arabic_txt, audio_player, quality_html, meta_md,
@@ -230,6 +286,7 @@ def build_app(manifest_path: str | Path):
         prev_btn.click(fn=lambda: _navigate(-1), outputs=outputs)
         next_btn.click(fn=lambda: _navigate(+1), outputs=outputs)
         jump_btn.click(fn=_jump_to_next_pending, outputs=outputs)
+        batch_reject_btn.click(fn=_batch_reject_failed_quality, outputs=outputs)
 
         # Load first sample on startup
         demo.load(fn=lambda: _load_sample(state_idx[0]), outputs=outputs)

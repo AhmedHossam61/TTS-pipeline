@@ -265,22 +265,67 @@ class XTTSEngine(TTSEngine):
     def __init__(self, cfg: Dict) -> None:
         self.name: str = cfg["name"]
         self._model_repo: str = cfg["model_repo"]
-        self._reference_audio: str = cfg.get("reference_audio", "")
         self._use_deepspeed: bool = cfg.get("use_deepspeed", False)
         self._temperature: float = cfg.get("temperature", 0.75)
         self._device_str: str = cfg.get("device", "cuda")
+        speakers_cfg = cfg.get("speakers", [])
+        self._speakers: List[Dict[str, object]] = []
+        if isinstance(speakers_cfg, list) and speakers_cfg:
+            for idx, sp in enumerate(speakers_cfg, start=1):
+                if not isinstance(sp, dict):
+                    continue
+                speaker_id = str(sp.get("id") or f"speaker_{idx:02d}")
+                ref_path = str(sp.get("reference_audio", "")).strip()
+                if not ref_path:
+                    continue
+                weight = sp.get("weight", 1.0)
+                self._speakers.append(
+                    {
+                        "id": speaker_id,
+                        "reference_audio": ref_path,
+                        "weight": weight,
+                    }
+                )
+        if not self._speakers:
+            legacy_ref = str(cfg.get("reference_audio", "")).strip()
+            if legacy_ref:
+                self._speakers = [
+                    {
+                        "id": self.name,
+                        "reference_audio": legacy_ref,
+                        "weight": 1.0,
+                    }
+                ]
+
+        # Runtime maps for fast lookup during inference.
+        self._speaker_refs: Dict[str, str] = {
+            str(s["id"]): str(s["reference_audio"]) for s in self._speakers
+        }
+        self._voice_weights: Dict[str, float] = {
+            str(s["id"]): float(s.get("weight", 1.0)) for s in self._speakers
+        }
         self._model = None
-        self._gpt_cond_latent = None
-        self._speaker_embedding = None
+        self._speaker_latents: Dict[str, tuple] = {}
 
     def is_available(self) -> bool:
-        ref = Path(self._reference_audio)
-        if not ref.exists():
+        if not self._speakers:
             log.warning(
-                "[%s] Reference audio not found: %s  "
+                "[%s] No reference audio configured. Set reference_audio or speakers[].reference_audio.",
+                self.name,
+            )
+            return False
+
+        missing = [
+            f"{speaker_id}:{ref_path}"
+            for speaker_id, ref_path in self._speaker_refs.items()
+            if not Path(ref_path).exists()
+        ]
+        if missing:
+            log.warning(
+                "[%s] Missing reference audio for speakers: %s  "
                 "Run: python scripts/download_references.py",
                 self.name,
-                self._reference_audio,
+                ", ".join(missing),
             )
             return False
         try:
@@ -360,23 +405,29 @@ class XTTSEngine(TTSEngine):
         model.to(device)
         model.eval()
 
-        log.info("[%s] Computing speaker latents from %s …", self.name, self._reference_audio)
-        gpt_cond_latent, speaker_embedding = model.get_conditioning_latents(
-            audio_path=[self._reference_audio],
-            gpt_cond_len=6,
-            max_ref_length=30,
-            sound_norm_refs=False,
-        )
+        for speaker_id, ref_path in self._speaker_refs.items():
+            log.info(
+                "[%s] Computing speaker latents for %s from %s …",
+                self.name,
+                speaker_id,
+                ref_path,
+            )
+            gpt_cond_latent, speaker_embedding = model.get_conditioning_latents(
+                audio_path=[ref_path],
+                gpt_cond_len=6,
+                max_ref_length=30,
+                sound_norm_refs=False,
+            )
+            self._speaker_latents[speaker_id] = (gpt_cond_latent, speaker_embedding)
 
         self._model = model
-        self._gpt_cond_latent = gpt_cond_latent
-        self._speaker_embedding = speaker_embedding
         log.info("[%s] Model ready on %s.", self.name, device)
 
     def voices(self) -> List[str]:
-        # The voice is determined by the reference audio; we expose a single
-        # pseudo-voice named after the model.
-        return [self.name]
+        return list(self._speaker_refs.keys())
+
+    def voice_weights(self) -> Dict[str, float]:
+        return self._voice_weights
 
     def synthesize(self, text: str, voice: str, output_path: str | Path) -> bool:
         output_path = Path(output_path)
@@ -384,14 +435,21 @@ class XTTSEngine(TTSEngine):
 
         try:
             self._load_model()
+            latents = self._speaker_latents.get(voice)
+            if latents is None and self._speaker_latents:
+                # Backward compatibility if old checkpoints carry a legacy voice id.
+                latents = next(iter(self._speaker_latents.values()))
+            if latents is None:
+                raise RuntimeError(f"No speaker latents found for voice '{voice}'")
+            gpt_cond_latent, speaker_embedding = latents
+
             out = self._model.inference(
                 text=text,
                 language="ar",
-                gpt_cond_latent=self._gpt_cond_latent,
-                speaker_embedding=self._speaker_embedding,
+                gpt_cond_latent=gpt_cond_latent,
+                speaker_embedding=speaker_embedding,
                 temperature=self._temperature,
             )
-            waveform = torch.tensor(out["wav"]).unsqueeze(0)
             # Use soundfile directly — torchaudio.save triggers TorchCodec on Windows
             import soundfile as sf
             arr = out["wav"]
@@ -408,6 +466,7 @@ class XTTSEngine(TTSEngine):
         if self._model is not None:
             del self._model
             self._model = None
+            self._speaker_latents.clear()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 

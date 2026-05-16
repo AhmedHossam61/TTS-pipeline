@@ -51,9 +51,17 @@ synthesis:
     - name: egtts
       enabled: true
       model_repo: OmarSamir/EGTTS-V0.1
-      # Path to a clean 6-12s WAV reference audio (the speaker voice to clone)
-      # Run: python scripts/download_references.py  to get sample reference files
-      reference_audio: data/references/egtts_reference.wav
+      # Speaker diversity strategy:
+      # define multiple reference speakers and optional weights.
+      # Exactly one speaker is sampled per prompt (deterministic per run_id+prompt).
+      speakers:
+        - id: eg_speaker_a
+          reference_audio: data/references/egtts_reference.wav
+          weight: 0.7
+        # Add more speakers as you collect additional clean references.
+        # - id: eg_speaker_b
+        #   reference_audio: data/references/egtts_reference_2.wav
+        #   weight: 0.3
       use_deepspeed: false          # deepspeed is unreliable on Windows
       temperature: 0.75
       device: cuda                  # or cpu
