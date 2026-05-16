@@ -128,10 +128,17 @@ def strip_latin(text: str) -> str:
     tokens = text.split()
     cleaned: List[str] = []
     for tok in tokens:
-        if re.fullmatch(r"[A-Za-z0-9_\-\.]+", tok):
-            # Entirely Latin/numeric token — drop it
+        if re.fullmatch(r"[A-Za-z]+", tok):
+            # Purely alphabetic Latin token (e.g. "lol", "OK", "TTS") —
+            # these are informal code-switched words with no Arabic rendering.
+            # Drop them.
             continue
-        # Strip any remaining Latin letters from mixed tokens
+        if re.fullmatch(r"[A-Za-z0-9_\-\.]+", tok) and re.search(r"\d", tok):
+            # Alphanumeric identifier (e.g. "A4", "MP3", "USB3", "COVID19") —
+            # carries semantic meaning; keep as-is and let the TTS engine handle it.
+            cleaned.append(tok)
+            continue
+        # Strip any remaining Latin letters from mixed Arabic-Latin tokens
         tok = re.sub(r"[A-Za-z]", "", tok).strip()
         if tok:
             cleaned.append(tok)

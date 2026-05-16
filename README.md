@@ -131,11 +131,11 @@ Before any text is sent to a TTS engine, `utils/arabic_utils.normalize_text()` a
 | Step | What it does | Why |
 |------|-------------|-----|
 | Diacritics removal | Strips tashkeel (ً ٌ ٍ َ ُ ِ ّ ْ) | TTS engines handle undiacritised text more consistently |
-| Numeral normalization | Arabic-Indic digits (٣, ٢٠٢٤) → ASCII → Egyptian Arabic words ("تلاتة", "ألفين وأربعة وعشرين") | Prevents inconsistent digit pronunciation across engines |
-| Latin stripping | Removes stray Latin tokens not part of code-switching context | Prevents mispronunciation artefacts in XTTS |
+| Numeral normalization | Arabic-Indic digits (٣, ٢٠٢٤) → ASCII → Egyptian Arabic words (`تلاتة`, `ألفين وأربعة وعشرين`) | Prevents inconsistent digit pronunciation across engines |
+| Latin stripping | Drops **purely alphabetic** Latin tokens (`lol`, `OK`, `wow`) — informal code-switching words with no Arabic phonetic value. **Letter+digit identifiers** (`A4`, `MP3`, `USB3`) are kept unchanged to preserve meaning. | Prevents mispronunciation artefacts in XTTS without corrupting product codes or identifiers |
 | Character cap | Truncates at 200 chars on a word boundary | Prevents XTTS / edge-tts failures on very long prompts |
 
-The cap is configurable via `max_prompt_chars` in `config.yaml`. Mixed alphanumeric tokens (e.g. `A4`, `COVID19`) are left untouched by the numeral step to avoid corrupting identifiers.
+The cap is configurable via `max_prompt_chars` in `config.yaml`.
 
 ---
 

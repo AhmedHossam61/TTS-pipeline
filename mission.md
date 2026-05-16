@@ -32,6 +32,7 @@ Synthesize audio from the prompts.
 | `gemini-tts` | `gemini-3.1-flash-tts-preview` via Vertex AI | Best overall audio quality |
 
 - [x] All 3 engines working and producing audio (`data/audio/`) — 30 files across 10 prompts
+- [x] **Pre-synthesis text normalization** — `normalize_text()` called on every prompt before dispatch to any engine (both initial and retry paths); applies numeral expansion, Latin stripping, and 200-char hard cap
 - [x] **Voice weight sampling** — each prompt gets one voice per engine drawn by `voice_weights` (e.g., 50/50 Salma/Shakir for edge-tts, 50/50 Charon/Achernar for gemini-tts), reducing redundancy and generation time
 - [x] TorchCodec / FFmpeg bug resolved — `egtts` generating successfully and reliably
 - [x] `torchaudio.load/save` monkey-patched to `soundfile` at module import time (before TTS imports) to bypass Windows DLL dependency
@@ -62,9 +63,7 @@ Provide a way to review (text, audio) pairs and separate good samples from bad b
 - [x] Real-time persistence — decisions survive browser refresh and app restart
 - [x] Summary stats (approved / rejected / pending counts)
 - [x] **Keyboard shortcuts** — `A` = approve, `R` = reject, `N` = next sample (implemented via `keydown` listener in Gradio JS)
-- [x] **Batch auto-reject** — one-click button rejects all pending `quality_passed = false` clips with `review_note: "auto_reject: quality_passed=false"`, reducing manual review burden on large datasets
-
-> **Note:** One-click batch-reject for all `quality_passed = false` clips is implemented in `pipeline/stage3_review.py` ("⚡ Batch reject pending clips with quality_passed = false" button). Clips are auto-rejected with `review_note: "auto_reject: quality_passed=false"`, leaving human review for borderline cases only.
+- [x] **Batch auto-reject** — one-click "⚡ Batch reject pending clips with quality_passed = false" button rejects all objectively bad clips instantly, leaving only borderline cases for manual listening
 
 ---
 
@@ -115,8 +114,7 @@ How synthetic data can mislead a downstream STT model, and how the pipeline addr
 - [x] Descriptive quality flags written to manifest (`too_short`, `low_snr`, etc.)
 - [x] `quality_passed` boolean surfaced in review UI with red badge highlighting
 - [x] Quality thresholds configurable in `config/config.yaml`
-
-> **Suggestion:** Currently `quality_passed = false` is a warning, not a gate — clips still enter the review queue. Consider an auto-reject path for hard failures (duration < 0.3s or SNR < 5 dB) to reduce reviewer burden. Soft failures stay in the queue for human judgement.
+- [x] Batch auto-reject for `quality_passed = false` clips available in Stage 3 review UI (see Stage 3)
 
 ---
 
@@ -147,6 +145,7 @@ How synthetic data can mislead a downstream STT model, and how the pipeline addr
 - [ ] **Missing:** No tests for `stage2_synthesize.py` (checkpoint DB, engine dispatch, voice weight sampling, retry logic)
 - [ ] **Missing:** No tests for `stage3_review.py` (manifest persistence, state transitions)
 - [ ] **Missing:** No tests for `utils/quality.py` (SNR/duration/silence logic)
+- [ ] **Missing:** No tests for `normalize_numerals()` and `strip_latin()` in `utils/arabic_utils.py` — new functions added but not yet covered by `tests/test_arabic_utils.py`
 - [ ] **Missing:** No integration test for the full `run_pipeline.py` end-to-end flow
 
 > **Suggestion:** The checkpoint DB (`utils/checkpointing.py`) is the most critical piece for reliability and has no test coverage. A test that simulates a mid-run crash (mark some jobs `running`, call `reset_running()`, verify they return to `pending`) would directly validate the resumability guarantee.
