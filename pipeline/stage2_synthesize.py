@@ -163,6 +163,39 @@ class TTSEngine(ABC):
         """Return the list of voice IDs this engine supports."""
         return []
 
+    def voice_weights(self) -> Dict[str, float]:
+        """Optional relative weights per voice (missing voices default to 1.0)."""
+        return {}
+
+    def select_voices_for_prompt(self, prompt_id: str, run_id: str) -> List[str]:
+        """
+        Return exactly one selected voice for this prompt/engine pair.
+
+        Selection is deterministic for (run_id, prompt_id, engine) so reruns of
+        the same run keep the same voice assignment while still giving a
+        weighted random distribution across the dataset.
+        """
+        available = self.voices()
+        if not available:
+            return []
+        if len(available) == 1:
+            return available
+
+        cfg = self.voice_weights() or {}
+        weights: List[float] = []
+        for voice in available:
+            try:
+                w = float(cfg.get(voice, 1.0))
+            except (TypeError, ValueError):
+                w = 1.0
+            weights.append(max(0.0, w))
+
+        if sum(weights) <= 0:
+            weights = [1.0] * len(available)
+
+        rng = random.Random(f"{run_id}:{prompt_id}:{self.name}")
+        return [rng.choices(available, weights=weights, k=1)[0]]
+
     def is_available(self) -> bool:
         """Return True if this engine can run right now."""
         return True
@@ -182,9 +215,13 @@ class EdgeTTSEngine(TTSEngine):
         self._voices: List[str] = cfg.get(
             "voices", ["ar-EG-SalmaNeural", "ar-EG-ShakirNeural"]
         )
+        self._voice_weights: Dict[str, float] = cfg.get("voice_weights", {})
 
     def voices(self) -> List[str]:
         return self._voices
+
+    def voice_weights(self) -> Dict[str, float]:
+        return self._voice_weights
 
     def synthesize(self, text: str, voice: str, output_path: str | Path) -> bool:
         try:
@@ -456,6 +493,7 @@ class GeminiTTSEngine(TTSEngine):
             "model_name", "gemini-3.1-flash-tts-preview"
         )
         self._voices: List[str] = cfg.get("voices", ["Charon"])
+        self._voice_weights: Dict[str, float] = cfg.get("voice_weights", {})
         self._language_code: str = cfg.get("language_code", "ar-EG")
         self._temperature: float = cfg.get("temperature", 1.0)
         self._project_id: Optional[str] = (
@@ -490,6 +528,9 @@ class GeminiTTSEngine(TTSEngine):
 
     def voices(self) -> List[str]:
         return self._voices
+
+    def voice_weights(self) -> Dict[str, float]:
+        return self._voice_weights
 
     def is_available(self) -> bool:
         if not self._project_id:
@@ -622,7 +663,7 @@ def run_stage2(config: Dict, run_id: str, prompts_manifest: str | Path) -> Path:
     jobs: List[Dict] = []
     for prompt in prompts:
         for engine in engines:
-            for voice in engine.voices():
+            for voice in engine.select_voices_for_prompt(prompt["id"], run_id):
                 voice_slug = _safe_stem(voice)
                 job_id = f"{run_id}_{prompt['id']}_{engine.name}_{voice_slug}"
                 audio_filename = f"{job_id}.wav"

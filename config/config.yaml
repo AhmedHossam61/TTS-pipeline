@@ -44,6 +44,9 @@ synthesis:
       voices:
         - ar-EG-SalmaNeural         # female
         - ar-EG-ShakirNeural        # male
+      voice_weights:
+        ar-EG-SalmaNeural: 0.5
+        ar-EG-ShakirNeural: 0.5
 
     - name: egtts
       enabled: true
@@ -71,20 +74,9 @@ synthesis:
       voices:
         - Charon
         - Achernar
-
-    - name: niletts
-      enabled: false
-      model_repo: KickItLikeShika/NileTTS-XTTS
-      reference_audio: data/references/niletts_reference.wav
-      use_deepspeed: false
-      temperature: 0.70
-      device: cuda
-
-    # Google Cloud TTS — set enabled: true and configure credentials in .env
-    - name: google-vertex
-      enabled: true
-      voice_name: ar-EG-Standard-A
-      speaking_rate: 1.0
+      voice_weights:
+        Charon: 0.5
+        Achernar: 0.5
 
 # ── Stage 3: Review UI ───────────────────────────────────────────────────────
 review:
