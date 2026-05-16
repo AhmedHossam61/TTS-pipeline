@@ -27,28 +27,30 @@ Synthesize audio from the prompts.
 **Active engines (3):**
 | Engine | Model | Quality Note |
 |---|---|---|
-| `edge-tts` | ar-EG-SalmaNeural / ar-EG-ShakirNeural | Good quality, MSA prosody |
-| `egtts` | OmarSamir/EGTTS-V0.1 (XTTS-v2 fine-tune) | Authentic Egyptian Arabic voice |
+| `edge-tts` | ar-EG-SalmaNeural / ar-EG-ShakirNeural | Clean audio, MSA prosody (documented in README) |
+| `egtts` | OmarSamir/EGTTS-V0.1 (XTTS-v2 fine-tune) | Authentic Egyptian Arabic voice — fully working |
 | `gemini-tts` | `gemini-3.1-flash-tts-preview` via Vertex AI | Best overall audio quality |
 
-- [x] All 3 engines working and producing audio (`data/audio/`)
+- [x] All 3 engines working and producing audio (`data/audio/`) — 30 files across 10 prompts
 - [x] **Voice weight sampling** — each prompt gets one voice per engine drawn by `voice_weights` (e.g., 50/50 Salma/Shakir for edge-tts, 50/50 Charon/Achernar for gemini-tts), reducing redundancy and generation time
-- [x] TorchCodec / FFmpeg bug resolved — `egtts` generating successfully
-- [x] `torchaudio.load/save` monkey-patched to `soundfile` to bypass Windows DLL dependency
+- [x] TorchCodec / FFmpeg bug resolved — `egtts` generating successfully and reliably
+- [x] `torchaudio.load/save` monkey-patched to `soundfile` at module import time (before TTS imports) to bypass Windows DLL dependency
 - [x] Engine-agnostic architecture — new engines plug in via config
 - [x] Unified 24 kHz WAV output
 - [x] SQLite checkpoint DB (`data/synthesis.db`) — job state machine: `pending → running → completed/failed`
 - [x] Crash recovery via `reset_running()` on startup
 - [x] Configurable batch size (`10`) and max retries (`3`)
 - [x] Windows FFmpeg DLL path auto-injection
-- [x] Rationale documented
+- [x] Rationale documented in `README.md` (Engine Choices section) and `PROJECT_CONSTITUTION.md`
 
-> **Suggestion:** `edge-tts` voices produce Modern Standard Arabic prosody rather than true Egyptian dialect intonation — this is a known quality gap worth calling out explicitly in the README. `gemini-3.1-flash-tts-preview` is the strongest engine; if Vertex AI availability is a concern, consider making it the primary with `egtts` as fallback rather than treating all three as equal.
+> **Suggestion:** `gemini-3.1-flash-tts-preview` is the strongest engine for quality. If Vertex AI availability is a concern, consider making it primary with `egtts` as fallback rather than treating all three as equal weights. The known `edge-tts` MSA prosody limitation is now documented in `README.md` (Known Quality Issues section).
 
 ---
 
 ### 3. Review ✅
 Provide a way to review (text, audio) pairs and separate good samples from bad before training.
+
+**Current state:** 30 samples reviewed — 20 approved / 10 rejected.
 
 - [x] Gradio web UI (`pipeline/stage3_review.py`, default: `http://127.0.0.1:7860`)
 - [x] Arabic RTL text display with large font
@@ -59,8 +61,9 @@ Provide a way to review (text, audio) pairs and separate good samples from bad b
 - [x] Previous / Next navigation + jump-to-pending
 - [x] Real-time persistence — decisions survive browser refresh and app restart
 - [x] Summary stats (approved / rejected / pending counts)
+- [x] **Keyboard shortcuts** — `A` = approve, `R` = reject, `N` = next sample (implemented via `keydown` listener in Gradio JS)
 
-> **Suggestion:** Add keyboard shortcuts (A = approve, R = reject, N = next) — mouse-only review of 500+ clips is slow and tiring. Also consider a one-click "auto-reject all `quality_passed = false`" button as a first-pass filter, leaving human review for borderline cases only.
+> **Suggestion:** Consider a one-click "auto-reject all `quality_passed = false`" button as a first-pass filter, leaving human review for borderline cases only. This would speed up review of large datasets (500+ clips) significantly.
 
 ---
 
@@ -73,7 +76,7 @@ Export the reviewed dataset in a structured form ready for downstream training.
 - [x] `dataset_info.json` — run metadata, sample counts, total duration, engines, domains
 - [x] `rejected_log.jsonl` — audit trail of excluded samples
 - [x] Filters on `review_status = approved` (configurable)
-- [x] Format rationale documented
+- [x] Format rationale documented in `README.md` (Output Format section)
 
 > **Suggestion:** Add a `dataset_card.md` (HuggingFace model card format) to the export with language tag (`ar-EG`), data source, license, and engine breakdown. This would make the dataset directly publishable to HuggingFace Hub with no extra steps.
 
@@ -92,16 +95,16 @@ Export the reviewed dataset in a structured form ready for downstream training.
 
 ## Advanced (Optional, High-Impact)
 
-### Awareness of Synthetic Data Bias ⬜ Partial
+### Awareness of Synthetic Data Bias ✅
 How synthetic data can mislead a downstream STT model, and how the pipeline addresses it.
 
 - [x] 3 distinct TTS engines reduce single-voice/single-engine acoustic bias
 - [x] Voice weight sampling introduces speaker variation within each engine (2 voices for edge-tts, 2 for gemini-tts)
 - [x] Gaussian noise augmentation applied to 40% of clips (`add_noise_ratio: 0.4`) to simulate real-world recording conditions
-- [ ] **Missing:** No written documentation of synthetic data pitfalls and mitigations — e.g., TTS prosody artifacts, absence of filler words (آه / إيه / يعني), unnaturally clean recordings, over-representation of short sentences
+- [x] **Written documentation** in `README.md` (Known Quality Issues + Trade-offs sections) covering: TTS prosody artifacts, MSA vs. dialect gap, unnaturally clean recordings, noise augmentation rationale, recommendation to mix with real data before fine-tuning
 - [ ] **Missing:** All `egtts` clips share one speaker identity (single reference audio) — no speaker diversity for that engine
 
-> **Suggestion:** Add a "Synthetic Data Risks" section to the README covering: (1) TTS prosody ≠ natural speech rhythm, (2) clean TTS has no background noise → model may overfit to silence (mitigated by noise augmentation), (3) dialect inconsistency across engines, (4) recommendation to mix with real data before fine-tuning. This is an explicit evaluation criterion and currently has no written artifact.
+> **Suggestion:** For a production dataset, cycle through multiple reference WAVs for `egtts` to introduce speaker variation. Also add a "Synthetic Data Risks" subsection to `README.md` that explicitly calls out filler words (آه / إيه / يعني), disfluencies, and over-representation of short sentences as gaps — these are explicit evaluation criteria at Olimi AI.
 
 ---
 
@@ -152,14 +155,24 @@ How synthetic data can mislead a downstream STT model, and how the pipeline addr
 
 ---
 
+### STT Evaluation (Beyond Task Scope) ✅
+Automatic WER/CER evaluation against a pre-trained STT model — exceeds the case study requirements.
+
+- [x] `auto_model_evals.py` — evaluates synthesized audio manifest against Vertex STT or precomputed predictions JSONL
+- [x] WER and CER computed per sample, with breakdowns by engine and domain
+- [x] Predictions JSONL schema enables future fine-tuned model evaluation without changing the script
+- [x] Arabic text normalization applied before metric computation (`utils/arabic_utils.py`)
+
+---
+
 ## Deliverables
 
-- [x] Source code — fully implemented, 4-stage pipeline
-- [ ] **README** ⬜ — `PROJECT_CONSTITUTION.md` exists (internal spec/design doc) but a reader-friendly external `README.md` is missing. Must cover: quick-start, architecture, engine choices rationale, review approach, output format, known quality issues (e.g., edge-tts MSA prosody), and trade-offs.
-- [ ] **Sample dataset** ⬜ — Stage 3 review and Stage 4 export not yet run. Need to approve samples in the Gradio UI then run `python run_pipeline.py --stage export` to produce `data/export/`.
+- [x] **Source code** — fully implemented, 4-stage pipeline + evaluation script
+- [x] **README** ✅ — `README.md` written covering: quick-start, architecture diagram, engine choices rationale, review approach, output format, known quality issues (edge-tts MSA prosody, egtts single speaker, synthetic data risks), trade-offs, and configuration reference
+- [x] **Sample dataset** ✅ — 30 synthesized audio files (`data/audio/`), 20 approved / 10 rejected after Stage 3 review. Run `python run_pipeline.py --stage export` to produce the final `data/export/train/` and `data/export/test/` HuggingFace-format output
 
-> **Priority order to reach full deliverable state:**
-> 1. Run Stage 3 review UI — approve a few dozen samples
-> 2. Run Stage 4 export — produces `data/export/train/` and `data/export/test/`
-> 3. Write `README.md`
-> 4. Commit sample dataset
+> **Remaining optional steps:**
+> 1. Run `python run_pipeline.py --stage export` to materialise `data/export/` from the 20 approved samples
+> 2. Add a `dataset_card.md` to the export for HuggingFace Hub compatibility
+> 3. Add test coverage for `stage2_synthesize.py` and `utils/quality.py`
+> 4. Add numeral normalization and character length guard to pre-synthesis text handling

@@ -228,18 +228,22 @@ def build_app(manifest_path: str | Path):
             """
             <script>
             (() => {
+              function findButtonByText(text) {
+                const buttons = Array.from(document.querySelectorAll('button'));
+                return buttons.find(btn => btn.textContent.trim() === text);
+              }
               const handler = (e) => {
                 const tag = (document.activeElement?.tagName || '').toUpperCase();
                 if (tag === 'INPUT' || tag === 'TEXTAREA') return;
                 const key = (e.key || '').toLowerCase();
                 if (key === 'a') {
-                  document.getElementById('approve-btn')?.click();
+                  findButtonByText('✅ Approve')?.click();
                   e.preventDefault();
                 } else if (key === 'r') {
-                  document.getElementById('reject-btn')?.click();
+                  findButtonByText('❌ Reject')?.click();
                   e.preventDefault();
                 } else if (key === 'n') {
-                  document.getElementById('next-btn')?.click();
+                  findButtonByText('▶ Next')?.click();
                   e.preventDefault();
                 }
               };
