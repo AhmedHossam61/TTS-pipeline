@@ -194,3 +194,18 @@ class CheckpointDB:
                 "SELECT job_id, audio_path FROM synthesis_jobs WHERE status='completed'"
             ).fetchall()
         return {r["job_id"]: r["audio_path"] for r in rows}
+
+    def get_completed_jobs(self) -> Dict[str, Dict]:
+        """Return {job_id: full_job_dict} for all completed jobs.
+
+        The dict contains the original text, domain, source, engine, voice,
+        and audio_path that were stored when the job was first registered and
+        later completed.  Use this when building the manifest so the recorded
+        text always matches what was actually synthesized.
+        """
+        with self._conn() as con:
+            rows = con.execute(
+                "SELECT job_id, prompt_id, engine, voice, text, domain, source, audio_path "
+                "FROM synthesis_jobs WHERE status='completed'"
+            ).fetchall()
+        return {r["job_id"]: dict(r) for r in rows}

@@ -231,3 +231,5 @@ __marimo__/
 .streamlit/secrets.toml
 
 SSDP_Task (1)_2.pdf
+comments/*.md
+PROJECT_CONSTITUTION.md

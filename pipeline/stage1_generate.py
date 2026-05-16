@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
 import re
 import time
 from datetime import datetime, timezone
@@ -149,6 +150,13 @@ def run_stage1(config: Dict, run_id: str) -> Path:
 
     # ── 1. Load seeds ─────────────────────────────────────────────────────────
     seeds = load_seeds(gen_cfg["seed_file"])
+    num_prompts: int = gen_cfg.get("num_prompts", 200)
+    
+    # If Gemini expansion is disabled, sample only num_prompts seeds
+    if not gen_cfg.get("expand_with_gemini", True):
+        if len(seeds) > num_prompts:
+            seeds = random.sample(seeds, num_prompts)
+            log.info("Sampled %d seeds from %d available", len(seeds), len(load_seeds(gen_cfg["seed_file"])))
 
     # ── 2. Expand with Gemini ─────────────────────────────────────────────────
     gemini_sentences: List[Dict] = []
@@ -169,7 +177,6 @@ def run_stage1(config: Dict, run_id: str) -> Path:
 
                 domains: List[str] = gen_cfg.get("domains", ["conversation"])
                 per_call: int = gen_cfg.get("gemini_sentences_per_call", 20)
-                num_prompts: int = gen_cfg.get("num_prompts", 200)
                 # Distribute target count across domains
                 per_domain = max(1, num_prompts // len(domains))
 

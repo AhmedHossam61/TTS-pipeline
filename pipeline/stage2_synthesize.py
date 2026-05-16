@@ -51,6 +51,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -60,11 +61,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import numpy as np
 import torch
 import torchaudio
 
 from utils.checkpointing import CheckpointDB
 from utils.quality import quality_check
+from utils.audio_augmentation import add_gaussian_noise
 
 log = logging.getLogger(__name__)
 
@@ -259,6 +262,38 @@ class XTTSEngine(TTSEngine):
         if self._model is not None:
             return
 
+        # ── Monkey-patch torchaudio.load to use soundfile ──────────────────────
+        # torchaudio.load internally calls TorchCodec which requires FFmpeg DLLs
+        # that are not available on Windows pre-built wheels.  We replace it with
+        # a soundfile-based loader that has no such dependency.
+        import soundfile as sf
+
+        def _sf_load(path, frame_offset=0, num_frames=-1, normalize=True, channels_first=True, format=None, backend=None):
+            data, sr = sf.read(str(path), dtype="float32", always_2d=True)
+            # data shape: (frames, channels) → convert to (channels, frames)
+            if channels_first:
+                data = data.T
+            tensor = torch.from_numpy(data.copy())
+            if num_frames > 0:
+                tensor = tensor[..., frame_offset:frame_offset + num_frames]
+            elif frame_offset > 0:
+                tensor = tensor[..., frame_offset:]
+            return tensor, sr
+
+        def _sf_save(path, src, sample_rate, channels_first=True, **kwargs):
+            arr = src.detach().cpu().numpy()
+            # arr shape: (channels, frames) or (frames,)
+            if arr.ndim == 2 and channels_first:
+                arr = arr.T  # → (frames, channels)
+            elif arr.ndim == 2 and not channels_first:
+                pass  # already (frames, channels)
+            if arr.ndim == 2 and arr.shape[1] == 1:
+                arr = arr[:, 0]  # mono: flatten
+            sf.write(str(path), arr, sample_rate)
+
+        torchaudio.load = _sf_load
+        torchaudio.save = _sf_save
+
         from TTS.tts.configs.xtts_config import XttsConfig
         from TTS.tts.models.xtts import Xtts
         from huggingface_hub import snapshot_download
@@ -320,7 +355,12 @@ class XTTSEngine(TTSEngine):
                 temperature=self._temperature,
             )
             waveform = torch.tensor(out["wav"]).unsqueeze(0)
-            torchaudio.save(str(output_path), waveform, TARGET_SR)
+            # Use soundfile directly — torchaudio.save triggers TorchCodec on Windows
+            import soundfile as sf
+            arr = out["wav"]
+            if hasattr(arr, "numpy"):
+                arr = arr.numpy()
+            sf.write(str(output_path), arr, TARGET_SR)
             return True
         except Exception as exc:
             log.warning("[%s] Synthesis failed: %s", self.name, exc)
@@ -560,29 +600,31 @@ def run_stage2(config: Dict, run_id: str, prompts_manifest: str | Path) -> Path:
 
     # ── Build synthesis manifest with quality signals ─────────────────────────
     log.info("Running quality checks and building manifest …")
-    completed = db.get_completed_audio_paths()  # {job_id: audio_path}
-    prompt_map = {p["id"]: p for p in prompts}
+    # Use get_completed_jobs() so the manifest always reflects the text that was
+    # *actually synthesized* (stored in the DB at job-creation time), not the
+    # potentially different text from the current run's prompts.
+    completed = db.get_completed_jobs()  # {job_id: full_job_dict}
 
     manifest_path = manifest_dir / f"manifest_{run_id}.jsonl"
     written = 0
     with manifest_path.open("w", encoding="utf-8") as fh:
         for job in tqdm(jobs, desc="Quality checks"):
             job_id = job["job_id"]
-            audio_path = completed.get(job_id)
-            if audio_path is None:
+            db_job = completed.get(job_id)
+            if db_job is None:
                 continue  # not completed — skip
 
+            audio_path = db_job["audio_path"]
             qr = quality_check(audio_path, quality_cfg)
-            prompt = prompt_map.get(job["prompt_id"], {})
 
             record = {
                 "id": job_id,
-                "prompt_id": job["prompt_id"],
-                "text": job["text"],
-                "domain": job.get("domain", prompt.get("domain", "")),
-                "source": job.get("source", prompt.get("source", "")),
-                "engine": job["engine"],
-                "voice": job["voice"],
+                "prompt_id": db_job["prompt_id"],
+                "text": db_job["text"],
+                "domain": db_job.get("domain") or "",
+                "source": db_job.get("source") or "",
+                "engine": db_job["engine"],
+                "voice": db_job["voice"],
                 "audio_path": audio_path,
                 "sample_rate": TARGET_SR,
                 **qr.to_dict(),
@@ -600,4 +642,42 @@ def run_stage2(config: Dict, run_id: str, prompts_manifest: str | Path) -> Path:
         manifest_path,
         final_stats,
     )
+
+    # ── Apply noise augmentation to a random subset ────────────────────────────
+    add_noise_ratio = syn_cfg.get("add_noise_ratio", 0.0)
+    if add_noise_ratio > 0 and written > 0:
+        log.info("Applying noise augmentation to %.0f%% of clips …", add_noise_ratio * 100)
+        
+        # Read manifest
+        manifest_records = []
+        with manifest_path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip():
+                    manifest_records.append(json.loads(line))
+        
+        # Select random indices for noise
+        num_to_augment = max(1, int(len(manifest_records) * add_noise_ratio))
+        indices_to_augment = random.sample(range(len(manifest_records)), num_to_augment)
+        
+        for idx in indices_to_augment:
+            record = manifest_records[idx]
+            audio_path = record.get("audio_path")
+            if not audio_path or not Path(audio_path).exists():
+                continue
+            
+            # Add noise with SNR ~20dB (moderate noise)
+            success = add_gaussian_noise(audio_path, audio_path, snr_db=20.0)
+            if success:
+                record["has_noise_augmentation"] = True
+                log.debug("Added noise to %s", audio_path)
+            else:
+                log.warning("Failed to add noise to %s", audio_path)
+        
+        # Rewrite manifest with augmentation flags
+        with manifest_path.open("w", encoding="utf-8") as fh:
+            for record in manifest_records:
+                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        
+        log.info("Noise augmentation complete — %d clips modified.", num_to_augment)
+    
     return manifest_path

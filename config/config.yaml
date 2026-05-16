@@ -5,9 +5,9 @@ pipeline:
 
 # ── Stage 1: Prompt Generation ───────────────────────────────────────────────
 generation:
-  num_prompts: 200
+  num_prompts: 10
   gemini_model: gemini-1.5-flash
-  expand_with_gemini: true          # false = seed corpus only
+  expand_with_gemini: false         # false = seed corpus only
   gemini_sentences_per_call: 20     # sentences per API call
   seed_file: data/seeds/seed_sentences.txt
   output_dir: data/prompts
@@ -36,6 +36,7 @@ synthesis:
   manifest_dir: data/manifests
   checkpoint_db: data/synthesis.db
   sample_rate: 24000                # unified output sample rate
+  add_noise_ratio: 0.4           # add synthetic noise to this fraction of clips (0.0-1.0)
 
   engines:
     - name: edge-tts
@@ -55,7 +56,7 @@ synthesis:
       device: cuda                  # or cpu
 
     - name: niletts
-      enabled: true
+      enabled: false
       model_repo: KickItLikeShika/NileTTS-XTTS
       reference_audio: data/references/niletts_reference.wav
       use_deepspeed: false
