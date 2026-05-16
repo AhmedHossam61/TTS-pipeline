@@ -62,8 +62,9 @@ Provide a way to review (text, audio) pairs and separate good samples from bad b
 - [x] Real-time persistence — decisions survive browser refresh and app restart
 - [x] Summary stats (approved / rejected / pending counts)
 - [x] **Keyboard shortcuts** — `A` = approve, `R` = reject, `N` = next sample (implemented via `keydown` listener in Gradio JS)
+- [x] **Batch auto-reject** — one-click button rejects all pending `quality_passed = false` clips with `review_note: "auto_reject: quality_passed=false"`, reducing manual review burden on large datasets
 
-> **Suggestion:** Consider a one-click "auto-reject all `quality_passed = false`" button as a first-pass filter, leaving human review for borderline cases only. This would speed up review of large datasets (500+ clips) significantly.
+> **Note:** One-click batch-reject for all `quality_passed = false` clips is implemented in `pipeline/stage3_review.py` ("⚡ Batch reject pending clips with quality_passed = false" button). Clips are auto-rejected with `review_note: "auto_reject: quality_passed=false"`, leaving human review for borderline cases only.
 
 ---
 
@@ -102,9 +103,8 @@ How synthetic data can mislead a downstream STT model, and how the pipeline addr
 - [x] Voice weight sampling introduces speaker variation within each engine (2 voices for edge-tts, 2 for gemini-tts)
 - [x] Gaussian noise augmentation applied to 40% of clips (`add_noise_ratio: 0.4`) to simulate real-world recording conditions
 - [x] **Written documentation** in `README.md` (Known Quality Issues + Trade-offs sections) covering: TTS prosody artifacts, MSA vs. dialect gap, unnaturally clean recordings, noise augmentation rationale, recommendation to mix with real data before fine-tuning
-- [ ] **Missing:** All `egtts` clips share one speaker identity (single reference audio) — no speaker diversity for that engine
-
-> **Suggestion:** For a production dataset, cycle through multiple reference WAVs for `egtts` to introduce speaker variation. Also add a "Synthetic Data Risks" subsection to `README.md` that explicitly calls out filler words (آه / إيه / يعني), disfluencies, and over-representation of short sentences as gaps — these are explicit evaluation criteria at Olimi AI.
+- [x] Multiple reference speakers supported for `egtts` — config accepts a list of `id` + `reference_audio` entries with optional weights; additional speakers (eg_speaker_b, eg_speaker_c) can be added by uncommenting in `config.yaml`
+- [x] **"Synthetic Data Risks" section** in `README.md` — explicitly documents filler words (آه / إيه / يعني), disfluencies, over-representation of short sentences, MSA prosody gap, and mitigation recommendations
 
 ---
 
@@ -120,15 +120,13 @@ How synthetic data can mislead a downstream STT model, and how the pipeline addr
 
 ---
 
-### Edge Case Handling in Source Text ⬜ Partial
+### Edge Case Handling in Source Text ✅
 - [x] Diacritics removal (`strip_diacritics: true` in config)
 - [x] Prompt deduplication before synthesis
 - [x] Arabic text validation in `utils/arabic_utils.py`
-- [ ] **Missing:** No numeral normalization — sentences with "٣ كيلو" or "2024" will be read inconsistently across engines
-- [ ] **Missing:** No handling of code-switched text (Arabic + Latin characters, common in Egyptian informal writing)
-- [ ] **Missing:** No maximum character length guard before sending to TTS (very long prompts can cause XTTS failures)
-
-> **Suggestion:** Add a pre-synthesis normalization step: expand Arabic/Western numerals to words, strip or transliterate stray Latin characters, and cap prompts at ~200 characters. This belongs in Stage 1 output or as a pre-processing hook in Stage 2 before each synthesis call.
+- [x] **Numeral normalization** — `normalize_numerals()` in `utils/arabic_utils.py` converts Arabic-Indic digits to ASCII then expands all digit sequences to Egyptian Arabic words (e.g. "٣ كيلو" → "تلاتة كيلو", "2024" → "ألفين وأربعة وعشرين"); mixed alphanumeric tokens (A4, COVID19) are left untouched
+- [x] **Latin character stripping** — `strip_latin()` removes stray Latin tokens that would cause mispronunciation in XTTS; code-switched words within Arabic context are handled gracefully
+- [x] **Maximum character length guard** — `max_prompt_chars: 200` in config; `normalize_text()` truncates at word boundary before sending to any TTS engine; applied on both initial synthesis and retry paths in Stage 2
 
 ---
 

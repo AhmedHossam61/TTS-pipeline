@@ -60,6 +60,7 @@ Key config knobs are in `config/config.yaml` — change `num_prompts`, enable/di
         │  stage2_synthesize.py                            │
         │                                                  │
         │  Per prompt × engine × voice job                 │
+        │  → text normalization (numerals, Latin, cap)     │
         │  ┌────────────┐ ┌────────┐ ┌────────────────┐   │
         │  │  edge-tts  │ │ egtts  │ │  gemini-tts    │   │
         │  │  (free,    │ │(XTTS-2 │ │  (Vertex AI,   │   │
@@ -123,6 +124,21 @@ Voice weight sampling (configured per engine in `config.yaml`) ensures that not 
 
 ---
 
+## Text Pre-processing
+
+Before any text is sent to a TTS engine, `utils/arabic_utils.normalize_text()` applies a normalization pipeline in Stage 2:
+
+| Step | What it does | Why |
+|------|-------------|-----|
+| Diacritics removal | Strips tashkeel (ً ٌ ٍ َ ُ ِ ّ ْ) | TTS engines handle undiacritised text more consistently |
+| Numeral normalization | Arabic-Indic digits (٣, ٢٠٢٤) → ASCII → Egyptian Arabic words ("تلاتة", "ألفين وأربعة وعشرين") | Prevents inconsistent digit pronunciation across engines |
+| Latin stripping | Removes stray Latin tokens not part of code-switching context | Prevents mispronunciation artefacts in XTTS |
+| Character cap | Truncates at 200 chars on a word boundary | Prevents XTTS / edge-tts failures on very long prompts |
+
+The cap is configurable via `max_prompt_chars` in `config.yaml`. Mixed alphanumeric tokens (e.g. `A4`, `COVID19`) are left untouched by the numeral step to avoid corrupting identifiers.
+
+---
+
 ## Review Approach
 
 Stage 3 opens a Gradio web UI at `http://127.0.0.1:7860`. For each sample you see:
@@ -137,6 +153,8 @@ Stage 3 opens a Gradio web UI at `http://127.0.0.1:7860`. For each sample you se
 Decisions are written back to the manifest immediately — no save button, no data loss on browser refresh or crash. Only `approved` samples pass through to Stage 4 export.
 
 Automated quality signals (SNR, duration, silence ratio) are surfaced as flags but do not auto-reject — they highlight candidates for rejection, leaving final judgment to the human reviewer.
+
+**Batch reject (first-pass filter):** The review UI includes a one-click **"Batch reject pending clips with quality_passed = false"** button. This instantly rejects every pending clip that already failed automated quality checks (SNR, duration, silence), without requiring you to listen to each one. For a 500-clip dataset where 100–200 clips are objectively bad, this single click eliminates the most obvious rejects first and leaves only borderline cases for manual listening — significantly reducing review time at scale.
 
 ## Evaluation Strategy
 
@@ -154,6 +172,27 @@ In short:
 - **Automatic evaluation** = optional scoring and filtering aid
 
 This keeps the pipeline honest about Egyptian Arabic quality while still making it possible to measure model performance automatically when needed.
+
+---
+
+## Synthetic Data Risks
+
+Synthetic datasets have known failure modes that are explicit evaluation criteria at Olimi AI. Be aware of these gaps before using this data for production STT fine-tuning:
+
+| Risk | Description | Mitigation |
+|------|-------------|------------|
+| **Filler words absent** | TTS engines never produce natural Egyptian Arabic fillers like آه، إيه، يعني، يلا، طب — these are common in real speech and critical for dialect recognition | Manually inject filler-word utterances in seed sentences or post-process |
+| **No disfluencies** | Real speakers repeat words, self-correct, hesitate ("أنا... أنا قصدي...") — synthetic speech is unnaturally fluent | Consider real-speech augmentation or scripted disfluency injection |
+| **Short sentence over-representation** | Seed prompts skew toward short, well-formed sentences. STT models trained on this will underperform on long conversational utterances | Explicitly add 15–25 word sentences across all domains |
+| **Flat prosody** | Neural TTS lacks the emotional range of real speakers — questions sound like statements, excited speech sounds neutral | Weight prompts toward emotionally loaded domains (emotions, instructions) |
+| **No background noise variety** | Synthetic noise augmentation (`add_noise_ratio`) is uniform Gaussian — real environments (car, cafe, phone call) have structured noise patterns | Layer real-world impulse responses or use RIR (Room Impulse Response) augmentation |
+| **Code-switching imbalance** | Egyptian Arabic commonly mixes with English; this pipeline has a `technology_codeswitching` domain but it may be underweighted | Increase prompt count for codeswitching domain explicitly |
+
+### How to reduce these risks
+
+1. **Filler words:** Add seed sentences that start with or contain آه، إيه، يعني، بص، يلا، طب، معلش (see `data/seeds/seed_sentences.txt`)
+2. **Sentence length:** Include multi-clause sentences (15+ words) in each domain in the seed file
+3. **Speaker diversity (egtts):** Add more reference WAV files under `data/references/` and uncomment additional `speakers` entries in `config/config.yaml` — each entry uses a different voice identity
 
 ---
 
@@ -210,9 +249,9 @@ Default train/test split: **90% / 10%**, deterministic (fixed seed).
 
 **Impact on downstream STT:** A model trained predominantly on edge-tts audio may generalise poorly to real Egyptian speech. Mitigations in this pipeline: edge-tts clips share the dataset with egtts and gemini-tts clips, which have more authentic dialect character. Treat edge-tts audio as a clean-acoustic supplement, not a dialect ground truth.
 
-### egtts — single speaker identity
+### egtts — speaker diversity requires additional reference WAVs
 
-All egtts clips share one reference audio file (`data/references/egtts_reference.wav`). XTTS voice cloning reproduces the timbre of that reference speaker across every sample. There is no speaker diversity within the egtts engine's contribution to the dataset.
+The config supports multiple reference speakers for egtts (add entries under `synthesis.engines.egtts.speakers` in `config.yaml`). By default only one reference WAV ships with the repo (`data/references/egtts_reference.wav`), so out of the box all egtts clips share the same speaker timbre. To add speaker diversity, record or source additional 10–30s clean Egyptian Arabic WAVs, place them under `data/references/`, and uncomment the `eg_speaker_b / eg_speaker_c` entries in config.
 
 ### Synthetic data general risks
 
@@ -241,6 +280,7 @@ synthesis:
   max_retries: 3
   sample_rate: 24000
   add_noise_ratio: 0.4      # fraction of clips that get Gaussian noise added
+  max_prompt_chars: 200     # hard cap applied before sending text to any TTS engine
 
   quality:
     min_duration_sec: 0.5
@@ -288,7 +328,7 @@ TTS-pipeline/
 │   ├── stage3_review.py        # Gradio review UI
 │   └── stage4_export.py        # HuggingFace audiofolder export
 ├── utils/
-│   ├── arabic_utils.py         # Diacritics removal, text normalization
+│   ├── arabic_utils.py         # Diacritics, numeral expansion, Latin stripping, char cap
 │   ├── quality.py              # SNR, duration, silence ratio checks
 │   ├── audio_augmentation.py   # Gaussian noise augmentation
 │   └── checkpointing.py        # SQLite job state machine
@@ -315,6 +355,6 @@ TTS-pipeline/
 
 **Free vs. metered:** edge-tts and egtts are free. gemini-tts bills per character via Vertex AI. For large runs, monitor GCP spend or cap `num_prompts` accordingly.
 
-**Automated vs. human quality gates:** Quality checks (SNR, duration, silence) flag bad clips but do not auto-reject them. This keeps reviewer control over borderline cases but increases review burden for large datasets. Hard failures (duration < 0.3s or SNR < 5 dB) are good candidates for auto-rejection if reviewer time is scarce.
+**Automated vs. human quality gates:** Quality checks (SNR, duration, silence) flag bad clips but do not auto-reject. The review UI includes a one-click batch-reject for all `quality_passed = false` clips as a first-pass filter; the remaining clips go through manual listening. This keeps human judgment in the loop for borderline cases while eliminating obvious failures at scale.
 
-**Single reference speaker for egtts:** Using one reference WAV per engine is simple and reproducible, but all egtts clips share the same speaker timbre. For speaker diversity, provide multiple reference WAVs and cycle through them per prompt.
+**Single reference speaker for egtts (default):** The repo ships with one reference WAV, so egtts clips share one speaker timbre by default. The config is built to accept multiple speakers — adding more reference WAVs unlocks speaker diversity without any code changes.

@@ -68,6 +68,7 @@ import torchaudio
 from utils.checkpointing import CheckpointDB
 from utils.quality import quality_check
 from utils.audio_augmentation import add_gaussian_noise
+from utils.arabic_utils import normalize_text as _normalize_prompt
 
 log = logging.getLogger(__name__)
 
@@ -698,6 +699,7 @@ def run_stage2(config: Dict, run_id: str, prompts_manifest: str | Path) -> Path:
     db_path = syn_cfg.get("checkpoint_db", "data/synthesis.db")
     max_retries: int = syn_cfg.get("max_retries", 3)
     batch_size: int = syn_cfg.get("batch_size", 10)
+    max_prompt_chars: int = syn_cfg.get("max_prompt_chars", 200)
 
     audio_dir.mkdir(parents=True, exist_ok=True)
     manifest_dir.mkdir(parents=True, exist_ok=True)
@@ -778,7 +780,11 @@ def run_stage2(config: Dict, run_id: str, prompts_manifest: str | Path) -> Path:
             ):
                 db.mark_completed(job["job_id"], str(output_path))
                 continue
-            success = engine.synthesize(job["text"], job["voice"], output_path)
+            success = engine.synthesize(
+                _normalize_prompt(job["text"], max_chars=max_prompt_chars),
+                job["voice"],
+                output_path,
+            )
             if success:
                 db.mark_completed(job["job_id"], str(output_path))
             else:
@@ -805,7 +811,9 @@ def run_stage2(config: Dict, run_id: str, prompts_manifest: str | Path) -> Path:
             for j in tqdm(failed_for_engine, desc=f"{engine.name} retry"):
                 retry_output = j.get("audio_path") or str(audio_dir / f"{j['job_id']}.wav")
                 engine_map[j["engine"]].synthesize(
-                    j["text"], j["voice"], retry_output
+                    _normalize_prompt(j["text"], max_chars=max_prompt_chars),
+                    j["voice"],
+                    retry_output,
                 )
                 if Path(retry_output).exists():
                     db.mark_completed(j["job_id"], retry_output)

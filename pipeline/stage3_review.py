@@ -168,6 +168,23 @@ def build_app(manifest_path: str | Path):
 
         return _jump_to_next_pending()
 
+    _keyboard_js = """
+    () => {
+      function findBtn(text) {
+        return Array.from(document.querySelectorAll('button'))
+          .find(b => b.textContent.trim() === text);
+      }
+      document.addEventListener('keydown', (e) => {
+        const tag = (document.activeElement?.tagName || '').toUpperCase();
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+        const key = e.key.toLowerCase();
+        if (key === 'a') { findBtn('\u2705 Approve')?.click(); e.preventDefault(); }
+        else if (key === 'r') { findBtn('\u274c Reject')?.click(); e.preventDefault(); }
+        else if (key === 'n') { findBtn('\u25b6 Next')?.click(); e.preventDefault(); }
+      });
+    }
+    """
+
     with gr.Blocks(
         title="TTS Pipeline — Review UI",
         css="""
@@ -182,6 +199,7 @@ def build_app(manifest_path: str | Path):
             border: 1px solid #ddd;
         }
         """,
+        js=_keyboard_js,
     ) as demo:
         gr.Markdown("# 🎙 TTS Pipeline — Review UI")
         gr.Markdown("**Shortcuts:** `A` = Approve, `R` = Reject, `N` = Next")
@@ -223,35 +241,6 @@ def build_app(manifest_path: str | Path):
         with gr.Row():
             prev_btn = gr.Button("◀ Previous")
             next_btn = gr.Button("▶ Next", elem_id="next-btn")
-
-        gr.HTML(
-            """
-            <script>
-            (() => {
-              function findButtonByText(text) {
-                const buttons = Array.from(document.querySelectorAll('button'));
-                return buttons.find(btn => btn.textContent.trim() === text);
-              }
-              const handler = (e) => {
-                const tag = (document.activeElement?.tagName || '').toUpperCase();
-                if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-                const key = (e.key || '').toLowerCase();
-                if (key === 'a') {
-                  findButtonByText('✅ Approve')?.click();
-                  e.preventDefault();
-                } else if (key === 'r') {
-                  findButtonByText('❌ Reject')?.click();
-                  e.preventDefault();
-                } else if (key === 'n') {
-                  findButtonByText('▶ Next')?.click();
-                  e.preventDefault();
-                }
-              };
-              window.addEventListener('keydown', handler);
-            })();
-            </script>
-            """
-        )
 
         outputs = [arabic_txt, audio_player, quality_html, meta_md, note_box, progress_txt, stats_md]
 

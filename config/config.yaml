@@ -37,6 +37,7 @@ synthesis:
   checkpoint_db: data/synthesis.db
   sample_rate: 24000                # unified output sample rate
   add_noise_ratio: 0.4           # add synthetic noise to this fraction of clips (0.0-1.0)
+  max_prompt_chars: 200             # hard cap before sending to TTS (prevents XTTS failures)
 
   engines:
     - name: edge-tts
@@ -57,11 +58,15 @@ synthesis:
       speakers:
         - id: eg_speaker_a
           reference_audio: data/references/egtts_reference.wav
-          weight: 0.7
-        # Add more speakers as you collect additional clean references.
+          weight: 0.5
+        # Uncomment and point to a real WAV file to add more speaker voices.
+        # Each reference should be 10–30s of clean Egyptian Arabic speech.
         # - id: eg_speaker_b
         #   reference_audio: data/references/egtts_reference_2.wav
         #   weight: 0.3
+        # - id: eg_speaker_c
+        #   reference_audio: data/references/egtts_reference_3.wav
+        #   weight: 0.2
       use_deepspeed: false          # deepspeed is unreliable on Windows
       temperature: 0.75
       device: cuda                  # or cpu
