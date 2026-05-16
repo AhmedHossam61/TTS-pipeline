@@ -1,0 +1,74 @@
+{
+  "run_id": "run_20260516_150833",
+  "created_at": "2026-05-16T15:08:33.803511+00:00",
+  "manifest_source": "data\\manifests\\manifest_run_20260516_145611.jsonl",
+  "total_samples": 29,
+  "total_duration_sec": 87.0,
+  "total_duration_min": 1.45,
+  "splits": {
+    "train": {
+      "num_samples": 26,
+      "total_duration_sec": 77.45,
+      "total_duration_min": 1.29,
+      "engines": {
+        "edge-tts": 1,
+        "gemini-tts": 18,
+        "egtts": 7
+      },
+      "domains": {
+        "instructions": 5,
+        "conversation_greetings": 2,
+        "technology_codeswitching": 2,
+        "health": 2,
+        "work_and_professional": 4,
+        "weather": 1,
+        "transport": 3,
+        "emotions": 3,
+        "family": 1,
+        "numbers_dates_times": 1,
+        "food": 2
+      }
+    },
+    "test": {
+      "num_samples": 3,
+      "total_duration_sec": 9.56,
+      "total_duration_min": 0.16,
+      "engines": {
+        "gemini-tts": 2,
+        "egtts": 1
+      },
+      "domains": {
+        "shopping": 1,
+        "health": 2
+      }
+    }
+  },
+  "engines": {
+    "edge-tts": 1,
+    "gemini-tts": 20,
+    "egtts": 8
+  },
+  "domains": {
+    "instructions": 5,
+    "conversation_greetings": 2,
+    "technology_codeswitching": 2,
+    "health": 4,
+    "work_and_professional": 4,
+    "weather": 1,
+    "transport": 3,
+    "emotions": 3,
+    "family": 1,
+    "numbers_dates_times": 1,
+    "food": 2,
+    "shopping": 1
+  },
+  "total_rejected": 31,
+  "total_pending": 0,
+  "format": {
+    "type": "audiofolder",
+    "audio_format": "wav",
+    "sample_rate": 24000,
+    "transcription_field": "transcription",
+    "load_with": "from datasets import load_dataset\nds = load_dataset('audiofolder', data_dir='data\\export')"
+  }
+}

@@ -5,7 +5,7 @@ pipeline:
 
 # ── Stage 1: Prompt Generation ───────────────────────────────────────────────
 generation:
-  num_prompts: 10
+  num_prompts: 20
   gemini_model: gemini-3.0-flash
   expand_with_gemini: false         # false = seed corpus only
   gemini_sentences_per_call: 20     # sentences per API call

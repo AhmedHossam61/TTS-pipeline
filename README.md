@@ -358,3 +358,20 @@ TTS-pipeline/
 **Automated vs. human quality gates:** Quality checks (SNR, duration, silence) flag bad clips but do not auto-reject. The review UI includes a one-click batch-reject for all `quality_passed = false` clips as a first-pass filter; the remaining clips go through manual listening. This keeps human judgment in the loop for borderline cases while eliminating obvious failures at scale.
 
 **Single reference speaker for egtts (default):** The repo ships with one reference WAV, so egtts clips share one speaker timbre by default. The config is built to accept multiple speakers — adding more reference WAVs unlocks speaker diversity without any code changes.
+
+---
+
+## Scaling Up with More Resources
+
+The current engine selection is deliberately constrained by what runs on a single consumer GPU (RTX 3050, 4 GB VRAM) or a free API tier. With more compute or budget, the following additions would meaningfully widen acoustic variety:
+
+| Resource needed | What it unlocks |
+|---|---|
+| **Multi-GPU machine or cloud GPU (A100/H100)** | Run [Coqui XTTS-v2](https://github.com/coqui-ai/TTS) with a large pool of reference speakers in parallel — 20–50 distinct voice identities instead of 1–2 |
+| **High-memory GPU (≥ 16 GB VRAM)** | Enable [StyleTTS2](https://github.com/yl4579/StyleTTS2) or [Matcha-TTS](https://github.com/shivammehta25/Matcha-TTS) for expressive, style-conditioned synthesis (happy, sad, fast, hesitant) — currently impossible on 4 GB |
+| **Google Cloud Vertex AI budget** | Scale gemini-tts to hundreds of voices and higher `num_prompts` without hitting spend limits; enable [Google Cloud TTS WaveNet/Neural2](https://cloud.google.com/text-to-speech) `ar-XA` voices for MSA variety alongside EG dialect voices |
+| **ElevenLabs / PlayHT API credits** | Access commercial voice cloning APIs with large pre-built Egyptian Arabic speaker libraries — no reference WAV collection needed |
+| **Whisper large-v3 locally (GPU)** | Replace cloud STT in `auto_model_evals.py` with a fully local WER pipeline, enabling fast evaluation loops without API round-trips |
+| **Distributed job queue (Ray / Celery)** | Parallelize synthesis across multiple machines — currently the loop is single-process, which is the main throughput bottleneck at scale |
+
+In summary: the pipeline architecture already supports plugging in additional engines (add a `TTSEngine` subclass in `stage2_synthesize.py`). The limiting factor is not code — it is the compute and API budget available to run them.

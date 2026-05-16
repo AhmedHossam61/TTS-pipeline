@@ -2,7 +2,6 @@
 # Generated data (audio, manifests, exports) — too large for git
 data/audio/
 data/manifests/
-data/export/
 data/prompts/
 data/synthesis.db
 data/references/*.wav

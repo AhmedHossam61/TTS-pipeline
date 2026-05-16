@@ -165,11 +165,10 @@ Automatic WER/CER evaluation against a pre-trained STT model — exceeds the cas
 ## Deliverables
 
 - [x] **Source code** — fully implemented, 4-stage pipeline + evaluation script
-- [x] **README** ✅ — `README.md` written covering: quick-start, architecture diagram, engine choices rationale, review approach, output format, known quality issues (edge-tts MSA prosody, egtts single speaker, synthetic data risks), trade-offs, and configuration reference
+- [x] **README** ✅ — `README.md` written covering: quick-start, architecture diagram, engine choices rationale, text pre-processing pipeline, review approach (keyboard shortcuts, batch auto-reject), evaluation strategy, synthetic data risks, output format, known quality issues, trade-offs, and configuration reference
 - [x] **Sample dataset** ✅ — 30 synthesized audio files (`data/audio/`), 20 approved / 10 rejected after Stage 3 review. Run `python run_pipeline.py --stage export` to produce the final `data/export/train/` and `data/export/test/` HuggingFace-format output
 
 > **Remaining optional steps:**
 > 1. Run `python run_pipeline.py --stage export` to materialise `data/export/` from the 20 approved samples
 > 2. Add a `dataset_card.md` to the export for HuggingFace Hub compatibility
-> 3. Add test coverage for `stage2_synthesize.py` and `utils/quality.py`
-> 4. Add numeral normalization and character length guard to pre-synthesis text handling
+> 3. Add test coverage for `stage2_synthesize.py`, `utils/quality.py`, and the new `normalize_numerals()` / `strip_latin()` functions in `utils/arabic_utils.py`
